@@ -37,66 +37,66 @@ Trace a `SELECT count() FROM hits WHERE url LIKE '%example%'` from the client so
 
 A client connects on TCP (native protocol) or HTTP. The corresponding handler runs in the server's connection-accepting thread pool.
 
-- [src/Server/TCPHandler.cpp](../src/Server/TCPHandler.cpp) — native protocol; the main path for `clickhouse-client` and inter-server traffic
-- [src/Server/HTTPHandler.h](../src/Server/HTTPHandler.h) — REST-style `?query=...`
-- [src/Server/MySQLHandler.h](../src/Server/MySQLHandler.h), [src/Server/PostgreSQLHandler.h](../src/Server/PostgreSQLHandler.h) — wire-compat shims
+- [src/Server/TCPHandler.cpp](../../src/Server/TCPHandler.cpp) — native protocol; the main path for `clickhouse-client` and inter-server traffic
+- [src/Server/HTTPHandler.h](../../src/Server/HTTPHandler.h) — REST-style `?query=...`
+- [src/Server/MySQLHandler.h](../../src/Server/MySQLHandler.h), [src/Server/PostgreSQLHandler.h](../../src/Server/PostgreSQLHandler.h) — wire-compat shims
 
 The handler reads the query string and arguments, attaches a `Session` and a per-query `Context`, and calls the universal entry point:
 
-- [src/Interpreters/executeQuery.cpp](../src/Interpreters/executeQuery.cpp) — `executeQuery` / `executeQueryImpl`
+- [src/Interpreters/executeQuery.cpp](../../src/Interpreters/executeQuery.cpp) — `executeQuery` / `executeQueryImpl`
 
 See [08-server-and-context.md](08-server-and-context.md).
 
 ### 2. Parse: SQL → AST
 
-`executeQueryImpl` invokes `parseQuery` ([src/Parsers/parseQuery.h](../src/Parsers/parseQuery.h)), which tokenizes the input and runs a hand-written recursive-descent parser, `ParserQuery` ([src/Parsers/ParserQuery.h](../src/Parsers/ParserQuery.h)). The result is an `IAST` tree of nodes like `ASTSelectQuery`, `ASTFunction`, `ASTIdentifier` ([src/Parsers/IAST.h](../src/Parsers/IAST.h)). The AST captures syntax only — identifiers are unresolved strings.
+`executeQueryImpl` invokes `parseQuery` ([src/Parsers/parseQuery.h](../../src/Parsers/parseQuery.h)), which tokenizes the input and runs a hand-written recursive-descent parser, `ParserQuery` ([src/Parsers/ParserQuery.h](../../src/Parsers/ParserQuery.h)). The result is an `IAST` tree of nodes like `ASTSelectQuery`, `ASTFunction`, `ASTIdentifier` ([src/Parsers/IAST.h](../../src/Parsers/IAST.h)). The AST captures syntax only — identifiers are unresolved strings.
 
 See [02-query-frontend.md](02-query-frontend.md).
 
 ### 3. Analyze: AST → QueryTree
 
-For `SELECT`, the **new analyzer** (the legacy `ExpressionAnalyzer` still exists for compatibility) takes over. `QueryTreeBuilder` ([src/Analyzer/QueryTreeBuilder.h](../src/Analyzer/QueryTreeBuilder.h)) lifts the AST into a `QueryTree` of `IQueryTreeNode`s ([src/Analyzer/IQueryTreeNode.h](../src/Analyzer/IQueryTreeNode.h)) and then runs ~30 semantic passes, the central one being `QueryAnalysisPass` ([src/Analyzer/Passes/QueryAnalysisPass.h](../src/Analyzer/Passes/QueryAnalysisPass.h)). After analysis, every identifier resolves to a concrete column/table/function, every expression has a known type, constants are folded, and rewrites like `CROSS → INNER JOIN` have run.
+For `SELECT`, the **new analyzer** (the legacy `ExpressionAnalyzer` still exists for compatibility) takes over. `QueryTreeBuilder` ([src/Analyzer/QueryTreeBuilder.h](../../src/Analyzer/QueryTreeBuilder.h)) lifts the AST into a `QueryTree` of `IQueryTreeNode`s ([src/Analyzer/IQueryTreeNode.h](../../src/Analyzer/IQueryTreeNode.h)) and then runs ~30 semantic passes, the central one being `QueryAnalysisPass` ([src/Analyzer/Passes/QueryAnalysisPass.h](../../src/Analyzer/Passes/QueryAnalysisPass.h)). After analysis, every identifier resolves to a concrete column/table/function, every expression has a known type, constants are folded, and rewrites like `CROSS → INNER JOIN` have run.
 
 ### 4. Plan: QueryTree → QueryPlan
 
-The `Planner` ([src/Planner/Planner.h](../src/Planner/Planner.h)) walks the QueryTree and emits a logical `QueryPlan` ([src/Processors/QueryPlan/QueryPlan.h](../src/Processors/QueryPlan/QueryPlan.h)) — a tree of `IQueryPlanStep` nodes (`ReadFromMergeTree`, `FilterStep`, `ExpressionStep`, `AggregatingStep`, ...). Three waves of optimizations run over the plan ([src/Processors/QueryPlan/Optimizations/Optimizations.h](../src/Processors/QueryPlan/Optimizations/Optimizations.h)): filter pushdown, PREWHERE conversion, read-in-order, primary-key range narrowing, and so on.
+The `Planner` ([src/Planner/Planner.h](../../src/Planner/Planner.h)) walks the QueryTree and emits a logical `QueryPlan` ([src/Processors/QueryPlan/QueryPlan.h](../../src/Processors/QueryPlan/QueryPlan.h)) — a tree of `IQueryPlanStep` nodes (`ReadFromMergeTree`, `FilterStep`, `ExpressionStep`, `AggregatingStep`, ...). Three waves of optimizations run over the plan ([src/Processors/QueryPlan/Optimizations/Optimizations.h](../../src/Processors/QueryPlan/Optimizations/Optimizations.h)): filter pushdown, PREWHERE conversion, read-in-order, primary-key range narrowing, and so on.
 
 ### 5. Lower: QueryPlan → QueryPipeline
 
-Each step calls `IQueryPlanStep::updatePipeline` to add concrete `IProcessor`s to a `QueryPipelineBuilder` ([src/QueryPipeline/QueryPipelineBuilder.h](../src/QueryPipeline/QueryPipelineBuilder.h)). The result is a `QueryPipeline` ([src/QueryPipeline/QueryPipeline.h](../src/QueryPipeline/QueryPipeline.h)): a graph whose leaves are sources (typically `MergeTreeSelectProcessor`), whose interior nodes are transforms (`ExpressionTransform`, `FilterTransform`, `AggregatingTransform`, `MergingSortedTransform`, ...), and whose root is the format output.
+Each step calls `IQueryPlanStep::updatePipeline` to add concrete `IProcessor`s to a `QueryPipelineBuilder` ([src/QueryPipeline/QueryPipelineBuilder.h](../../src/QueryPipeline/QueryPipelineBuilder.h)). The result is a `QueryPipeline` ([src/QueryPipeline/QueryPipeline.h](../../src/QueryPipeline/QueryPipeline.h)): a graph whose leaves are sources (typically `MergeTreeSelectProcessor`), whose interior nodes are transforms (`ExpressionTransform`, `FilterTransform`, `AggregatingTransform`, `MergingSortedTransform`, ...), and whose root is the format output.
 
 ### 6. Read: storage produces chunks
 
-For our `hits` table, the source processors come from `MergeTreeDataSelectExecutor::read` ([src/Storages/MergeTree/MergeTreeDataSelectExecutor.h](../src/Storages/MergeTree/MergeTreeDataSelectExecutor.h)). It:
+For our `hits` table, the source processors come from `MergeTreeDataSelectExecutor::read` ([src/Storages/MergeTree/MergeTreeDataSelectExecutor.h](../../src/Storages/MergeTree/MergeTreeDataSelectExecutor.h)). It:
 
 1. Prunes parts by partition key.
 2. Uses the **sparse primary index** to compute mark ranges intersecting the WHERE.
 3. Applies skip indices (minmax, bloom, set, ...) and projections.
 4. Builds parallel reading streams over the selected `MarkRange`s.
 
-Data on disk lives in **immutable parts** ([src/Storages/MergeTree/IMergeTreeDataPart.h](../src/Storages/MergeTree/IMergeTreeDataPart.h)) with `.bin` (compressed column data) and `.mrk` (offsets into `.bin`) files. Reads go through `ReadBuffer` ([src/IO/ReadBuffer.h](../src/IO/ReadBuffer.h)), wrapped in `CompressedReadBuffer` ([src/Compression/CompressedReadBuffer.h](../src/Compression/CompressedReadBuffer.h)).
+Data on disk lives in **immutable parts** ([src/Storages/MergeTree/IMergeTreeDataPart.h](../../src/Storages/MergeTree/IMergeTreeDataPart.h)) with `.bin` (compressed column data) and `.mrk` (offsets into `.bin`) files. Reads go through `ReadBuffer` ([src/IO/ReadBuffer.h](../../src/IO/ReadBuffer.h)), wrapped in `CompressedReadBuffer` ([src/Compression/CompressedReadBuffer.h](../../src/Compression/CompressedReadBuffer.h)).
 
 See [04-storages-and-mergetree.md](04-storages-and-mergetree.md) and [06-io-and-formats.md](06-io-and-formats.md).
 
 ### 7. Execute: PipelineExecutor
 
-The handler wraps the pipeline in a `PullingPipelineExecutor` ([src/Processors/Executors/PullingPipelineExecutor.h](../src/Processors/Executors/PullingPipelineExecutor.h)) and calls `pull(chunk)` in a loop. Internally the `PipelineExecutor` ([src/Processors/Executors/PipelineExecutor.h](../src/Processors/Executors/PipelineExecutor.h)) walks an `ExecutingGraph`, calling each processor's split `prepare()` (cheap, port-state-only, serialized) / `work()` (CPU-bound, parallel) state-machine pair. Async sources (S3, network) yield via `schedule()` and resume on epoll readiness.
+The handler wraps the pipeline in a `PullingPipelineExecutor` ([src/Processors/Executors/PullingPipelineExecutor.h](../../src/Processors/Executors/PullingPipelineExecutor.h)) and calls `pull(chunk)` in a loop. Internally the `PipelineExecutor` ([src/Processors/Executors/PipelineExecutor.h](../../src/Processors/Executors/PipelineExecutor.h)) walks an `ExecutingGraph`, calling each processor's split `prepare()` (cheap, port-state-only, serialized) / `work()` (CPU-bound, parallel) state-machine pair. Async sources (S3, network) yield via `schedule()` and resume on epoll readiness.
 
 See [03-processors-and-pipeline.md](03-processors-and-pipeline.md).
 
 ### 8. Compute: vectorized work
 
-`FilterTransform` runs the WHERE: it calls into an `ActionsDAG` ([src/Interpreters/ActionsDAG.h](../src/Interpreters/ActionsDAG.h)) of compiled expression nodes; the `LIKE` is an `IExecutableFunction` ([src/Functions/IFunction.h](../src/Functions/IFunction.h)) acting on an entire `IColumn` of strings ([src/Columns/IColumn.h](../src/Columns/IColumn.h)) at once. `AggregatingTransform` then maintains aggregate states ([src/AggregateFunctions/IAggregateFunction.h](../src/AggregateFunctions/IAggregateFunction.h)) in an `Arena`-backed hash table.
+`FilterTransform` runs the WHERE: it calls into an `ActionsDAG` ([src/Interpreters/ActionsDAG.h](../../src/Interpreters/ActionsDAG.h)) of compiled expression nodes; the `LIKE` is an `IExecutableFunction` ([src/Functions/IFunction.h](../../src/Functions/IFunction.h)) acting on an entire `IColumn` of strings ([src/Columns/IColumn.h](../../src/Columns/IColumn.h)) at once. `AggregatingTransform` then maintains aggregate states ([src/AggregateFunctions/IAggregateFunction.h](../../src/AggregateFunctions/IAggregateFunction.h)) in an `Arena`-backed hash table.
 
 See [05-functions.md](05-functions.md).
 
 ### 9. Format and send
 
-The pipeline ends in an `IOutputFormat` ([src/Processors/IOutputFormat.h](../src/Processors/IOutputFormat.h)) chosen by the client (`Native`, `JSONEachRow`, `Pretty`, ...) writing into a `WriteBuffer` connected to the socket.
+The pipeline ends in an `IOutputFormat` ([src/Processors/IOutputFormat.h](../../src/Processors/Formats/IOutputFormat.h)) chosen by the client (`Native`, `JSONEachRow`, `Pretty`, ...) writing into a `WriteBuffer` connected to the socket.
 
 ### 10. Distributed variant
 
-If `hits` were a `StorageDistributed` ([src/Storages/StorageDistributed.h](../src/Storages/StorageDistributed.h)), step 6 would instead instantiate one `RemoteQueryExecutor` ([src/QueryPipeline/RemoteQueryExecutor.h](../src/QueryPipeline/RemoteQueryExecutor.h)) per shard. Each one opens a native-protocol `Connection` ([src/Client/Connection.h](../src/Client/Connection.h)) to a remote replica, ships the rewritten subquery, and receives `Native`-format blocks that feed the local pipeline as if they were sources. Aggregation is split into partial (remote) and final (initiator) stages.
+If `hits` were a `StorageDistributed` ([src/Storages/StorageDistributed.h](../../src/Storages/StorageDistributed.h)), step 6 would instead instantiate one `RemoteQueryExecutor` ([src/QueryPipeline/RemoteQueryExecutor.h](../../src/QueryPipeline/RemoteQueryExecutor.h)) per shard. Each one opens a native-protocol `Connection` ([src/Client/Connection.h](../../src/Client/Connection.h)) to a remote replica, ships the rewritten subquery, and receives `Native`-format blocks that feed the local pipeline as if they were sources. Aggregation is split into partial (remote) and final (initiator) stages.
 
 See [07-distributed-and-coordination.md](07-distributed-and-coordination.md).
 
@@ -112,7 +112,7 @@ See [07-distributed-and-coordination.md](07-distributed-and-coordination.md).
 
 **Sparse primary index.** A B-tree per row would be larger than the data. The sparse index instead records one key per `index_granularity` (default 8192) rows; this is small enough to live in memory and precise enough to prune most of the parts on selective predicates, with the per-granule scan covering the rest.
 
-**`Context` everywhere.** Settings, the database catalog, access control, caches, and per-query state all need to be reachable from any layer — parser, planner, function, storage. Rather than threading them as parameters, ClickHouse uses a shared/per-query `Context` ([src/Interpreters/Context.h](../src/Interpreters/Context.h)). Subqueries and distributed fragments get `Context::createCopy` snapshots.
+**`Context` everywhere.** Settings, the database catalog, access control, caches, and per-query state all need to be reachable from any layer — parser, planner, function, storage. Rather than threading them as parameters, ClickHouse uses a shared/per-query `Context` ([src/Interpreters/Context.h](../../src/Interpreters/Context.h)). Subqueries and distributed fragments get `Context::createCopy` snapshots.
 
 ## A simplified call graph
 

@@ -6,23 +6,23 @@ This file covers everything between the network handler receiving a query string
 SQL text
   ──parser──►  IAST            (syntactic; identifiers are strings)
   ──analyzer──►  QueryTree     (semantic; identifiers resolved, types known)
-  ──planner──►   QueryPlan     (logical operators; can still be rewritten)
+  ──planner──►   QueryPlan     (physical operator tree; algorithm choices made)
   ──optimizer──► QueryPlan     (same shape, smarter)
-  ──lower──►     QueryPipeline (physical: a graph of IProcessor)
+  ──lower──►     QueryPipeline (a graph of IProcessor that executes the plan)
 ```
 
-`executeQuery` in [src/Interpreters/executeQuery.cpp](../src/Interpreters/executeQuery.cpp) drives all of this.
+`executeQuery` in [src/Interpreters/executeQuery.cpp](../../src/Interpreters/executeQuery.cpp) drives all of this.
 
 ## 1. Parser
 
 ClickHouse uses **hand-written recursive-descent parsers**, not a generated one. The reason is good error messages on a large dialect with many context-sensitive bits (e.g. `WITH` queries, lambdas, complex `JOIN` syntax).
 
-Key files in [src/Parsers/](../src/Parsers/):
+Key files in [src/Parsers/](../../src/Parsers/):
 
-- [src/Parsers/IParser.h](../src/Parsers/IParser.h) — base class. Each parser exposes `parseImpl(Pos & pos, ASTPtr & node, Expected & expected)`. `Pos` tracks the current token, depth, and backtrack state. `Expected` accumulates "what we hoped to see," used to render the `Expected ... near '...'` errors.
-- [src/Parsers/ParserQuery.h](../src/Parsers/ParserQuery.h) — top-level dispatch. Tries `ParserSelectWithUnionQuery`, `ParserInsertQuery`, `ParserCreateQuery`, etc., in turn.
-- [src/Parsers/parseQuery.h](../src/Parsers/parseQuery.h) — the `parseQuery` free function: tokenize, run the parser, produce an `ASTPtr`.
-- [src/Parsers/IAST.h](../src/Parsers/IAST.h) — `IAST` is the AST node base. Important node families: `ASTSelectQuery`, `ASTSelectWithUnionQuery`, `ASTFunction`, `ASTIdentifier`, `ASTLiteral`, `ASTTableExpression`, `ASTOrderByElement`, `ASTAlterCommand`, ...
+- [src/Parsers/IParser.h](../../src/Parsers/IParser.h) — base class. Each parser exposes `parseImpl(Pos & pos, ASTPtr & node, Expected & expected)`. `Pos` tracks the current token, depth, and backtrack state. `Expected` accumulates "what we hoped to see," used to render the `Expected ... near '...'` errors.
+- [src/Parsers/ParserQuery.h](../../src/Parsers/ParserQuery.h) — top-level dispatch. Tries `ParserSelectWithUnionQuery`, `ParserInsertQuery`, `ParserCreateQuery`, etc., in turn.
+- [src/Parsers/parseQuery.h](../../src/Parsers/parseQuery.h) — the `parseQuery` free function: tokenize, run the parser, produce an `ASTPtr`.
+- [src/Parsers/IAST.h](../../src/Parsers/IAST.h) — `IAST` is the AST node base. Important node families: `ASTSelectQuery`, `ASTSelectWithUnionQuery`, `ASTFunction`, `ASTIdentifier`, `ASTLiteral`, `ASTTableExpression`, `ASTOrderByElement`, `ASTAlterCommand`, ...
 
 An AST is **purely syntactic**. `ASTIdentifier("x")` doesn't know whether `x` is a column, an alias, or a table; that's the analyzer's job.
 
@@ -30,14 +30,14 @@ There is also a dialect dispatch layer: under settings, you can parse Kusto (KQL
 
 ## 2. Analyzer (the new path)
 
-For a long time ClickHouse used `ExpressionAnalyzer` ([src/Interpreters/ExpressionAnalyzer.h](../src/Interpreters/ExpressionAnalyzer.h)) which rewrote the AST in place to perform semantic analysis. That was hard to extend (rewriting AST while it's being interpreted) and the project replaced it with the **Analyzer** in [src/Analyzer/](../src/Analyzer/). The old path still exists for `INSERT`, DDL, and as a compatibility fallback (controlled by the `allow_experimental_analyzer` setting, which now defaults on), but **all SELECT queries on modern ClickHouse go through the new analyzer**.
+For a long time ClickHouse used `ExpressionAnalyzer` ([src/Interpreters/ExpressionAnalyzer.h](../../src/Interpreters/ExpressionAnalyzer.h)) which rewrote the AST in place to perform semantic analysis. That was hard to extend (rewriting AST while it's being interpreted) and the project replaced it with the **Analyzer** in [src/Analyzer/](../../src/Analyzer/). The old path still exists for `INSERT`, DDL, and as a compatibility fallback (controlled by the `enable_analyzer` setting — formerly `allow_experimental_analyzer`, which is now an alias; default `true`), but **all SELECT queries on modern ClickHouse go through the new analyzer**.
 
 The new analyzer introduces a different IR — the `QueryTree`:
 
-- [src/Analyzer/IQueryTreeNode.h](../src/Analyzer/IQueryTreeNode.h) — base class. Node types include `QUERY`, `UNION`, `IDENTIFIER`, `COLUMN`, `FUNCTION`, `CONSTANT`, `LAMBDA`, `TABLE`, `JOIN`, `ARRAY_JOIN`, `MATCHER` (`SELECT *`), `WINDOW`, `SORT`.
-- [src/Analyzer/QueryTreeBuilder.h](../src/Analyzer/QueryTreeBuilder.h) — `buildQueryTree(ASTPtr, ContextPtr)`: translates a parsed AST into a `QueryTreeNodePtr`.
+- [src/Analyzer/IQueryTreeNode.h](../../src/Analyzer/IQueryTreeNode.h) — base class. Node types include `QUERY`, `UNION`, `IDENTIFIER`, `COLUMN`, `FUNCTION`, `CONSTANT`, `LAMBDA`, `TABLE`, `JOIN`, `ARRAY_JOIN`, `MATCHER` (`SELECT *`), `WINDOW`, `SORT`.
+- [src/Analyzer/QueryTreeBuilder.h](../../src/Analyzer/QueryTreeBuilder.h) — `buildQueryTree(ASTPtr, ContextPtr)`: translates a parsed AST into a `QueryTreeNodePtr`.
 
-Then it runs a pass pipeline ([src/Analyzer/Passes/](../src/Analyzer/Passes/)). The central one is **`QueryAnalysisPass`** ([src/Analyzer/Passes/QueryAnalysisPass.h](../src/Analyzer/Passes/QueryAnalysisPass.h)), which does the heavy lifting of name resolution, type inference, aggregation/window validation, scalar subquery handling, and constant folding. After it runs, every identifier resolves to a concrete `ColumnNode`/`TableNode`/`FunctionNode`, every `FunctionNode` has a resolved `IFunctionBase`, and every node has a known `DataTypePtr`.
+Then it runs a pass pipeline ([src/Analyzer/Passes/](../../src/Analyzer/Passes/)). The central one is **`QueryAnalysisPass`** ([src/Analyzer/Passes/QueryAnalysisPass.h](../../src/Analyzer/Passes/QueryAnalysisPass.h)), which does the heavy lifting of name resolution, type inference, aggregation/window validation, scalar subquery handling, and constant folding. After it runs, every identifier resolves to a concrete `ColumnNode`/`TableNode`/`FunctionNode`, every `FunctionNode` has a resolved `IFunctionBase`, and every node has a known `DataTypePtr`.
 
 Other passes (~30 total) perform targeted rewrites: `CrossToInnerJoinPass`, `IfChainToMultiIfPass`, `LogicalExpressionOptimizerPass`, `OrderByLimitByDuplicateEliminationPass`, `FuseFunctionsPass` (e.g. `sum(x) / count(x)` → `avg(x)`), and so on. They run in a fixed order via `QueryTreePassManager`.
 
@@ -45,18 +45,18 @@ Other passes (~30 total) perform targeted rewrites: `CrossToInnerJoinPass`, `IfC
 
 ## 3. Planner
 
-[src/Planner/Planner.h](../src/Planner/Planner.h) consumes an analyzed `QueryTreeNodePtr` and emits a `QueryPlan`.
+[src/Planner/Planner.h](../../src/Planner/Planner.h) consumes an analyzed `QueryTreeNodePtr` and emits a `QueryPlan`.
 
 Construction takes the QueryTree, a `SelectQueryOptions`, and a `PlannerContext` (carries the global `Context` plus per-query state like the table-expression-to-storage map). Important methods:
 
 - `buildQueryPlanIfNeeded()` — lazy entry point.
 - `buildPlanForQueryNode()` / `buildPlanForUnionNode()` — recursive builders.
 
-The Planner is where set-oriented decisions get made: which JOIN algorithm (`hash` / `parallel_hash` / `partial_merge` / `direct` / ...), whether to perform partial aggregation locally before shuffling, how to handle `IN (SELECT ...)` (broadcast vs build sets), where to place sort barriers. It is *not* yet physical execution — it builds a tree of plan steps.
+The Planner is where set-oriented decisions get made: which JOIN algorithm (`hash` / `parallel_hash` / `partial_merge` / `direct` / ...), whether to perform partial aggregation locally before shuffling, how to handle `IN (SELECT ...)` (broadcast vs build sets), where to place sort barriers. The output is a **physical operator tree** — every step in the resulting `QueryPlan` already names a concrete algorithm and access path (e.g. `JoinStep` carries an `IJoin` instance, `ReadFromMergeTree` carries computed mark ranges). Joins are a partial exception: the Planner can emit a `JoinStepLogical` ([src/Processors/QueryPlan/JoinStepLogical.h](../../src/Processors/QueryPlan/JoinStepLogical.h)) when the algorithm isn't fully pinned yet, and the optimizer's `convertLogicalJoinStepsToPhysical` pass rewrites it to a concrete `JoinStep` before lowering. What this tree is *not* yet is a graph of `IProcessor`s — that's the next stage.
 
 ## 4. QueryPlan and its optimizations
 
-[src/Processors/QueryPlan/QueryPlan.h](../src/Processors/QueryPlan/QueryPlan.h) defines `QueryPlan`, a tree of `QueryPlan::Node`s each owning an `IQueryPlanStep` ([src/Processors/QueryPlan/IQueryPlanStep.h](../src/Processors/QueryPlan/IQueryPlanStep.h)).
+[src/Processors/QueryPlan/QueryPlan.h](../../src/Processors/QueryPlan/QueryPlan.h) defines `QueryPlan`, a tree of `QueryPlan::Node`s each owning an `IQueryPlanStep` ([src/Processors/QueryPlan/IQueryPlanStep.h](../../src/Processors/QueryPlan/IQueryPlanStep.h)).
 
 A small but representative set of steps (all in `src/Processors/QueryPlan/`):
 
@@ -73,7 +73,7 @@ A small but representative set of steps (all in `src/Processors/QueryPlan/`):
 | `UnionStep` | Combine plans for `UNION`. |
 | `CreatingSetsStep` | Materialize `IN (subquery)`. |
 
-The plan is then optimized in three passes; the entry points and full pass list live in [src/Processors/QueryPlan/Optimizations/Optimizations.h](../src/Processors/QueryPlan/Optimizations/Optimizations.h):
+The plan is then optimized in three passes; the entry points and full pass list live in [src/Processors/QueryPlan/Optimizations/Optimizations.h](../../src/Processors/QueryPlan/Optimizations/Optimizations.h):
 
 1. **First-pass optimizations** (local, idempotent): `liftUpArrayJoin`, `pushDownLimit`, `splitFilter`, `mergeExpressions`, `filterPushDown`, `convertOuterJoinToInnerJoin`, `convertLogicalJoinStepsToPhysical`, ...
 2. **Second-pass optimizations** (storage-aware): `optimizePrimaryKeyConditionAndLimit` (pushes WHERE bounds into MergeTree's mark-range computation), `optimizePrewhere` (moves cheap, selective predicates into PREWHERE so they read fewer columns), `optimizeReadInOrder` (lets MergeTree return rows pre-sorted so `ORDER BY` becomes free), `optimizeAggregationInOrder` (same for `GROUP BY`).
@@ -83,16 +83,16 @@ These optimizations are why query performance is often dominated by *which* of t
 
 ## 5. Lowering: QueryPlan → QueryPipeline
 
-Each `IQueryPlanStep` knows how to build its physical implementation via `updatePipeline(QueryPipelineBuilders, BuildQueryPipelineSettings)`. The Interpreter walks the plan top-down, threading a `QueryPipelineBuilder` ([src/QueryPipeline/QueryPipelineBuilder.h](../src/QueryPipeline/QueryPipelineBuilder.h)) through it, and the result is a `QueryPipeline` ([src/QueryPipeline/QueryPipeline.h](../src/QueryPipeline/QueryPipeline.h)) — the actual graph of `IProcessor`s that will execute. See [03-processors-and-pipeline.md](03-processors-and-pipeline.md).
+Each `IQueryPlanStep` knows how to build its physical implementation via `updatePipeline(QueryPipelineBuilders, BuildQueryPipelineSettings)`. The Interpreter walks the plan top-down, threading a `QueryPipelineBuilder` ([src/QueryPipeline/QueryPipelineBuilder.h](../../src/QueryPipeline/QueryPipelineBuilder.h)) through it, and the result is a `QueryPipeline` ([src/QueryPipeline/QueryPipeline.h](../../src/QueryPipeline/QueryPipeline.h)) — the actual graph of `IProcessor`s that will execute. See [03-processors-and-pipeline.md](03-processors-and-pipeline.md).
 
 ## 6. Interpreters
 
-The top-level dispatcher is [src/Interpreters/InterpreterFactory.h](../src/Interpreters/InterpreterFactory.h). It maps AST node types to interpreter classes:
+The top-level dispatcher is [src/Interpreters/InterpreterFactory.h](../../src/Interpreters/InterpreterFactory.h). It maps AST node types to interpreter classes:
 
 | Query type | Interpreter |
 | --- | --- |
-| `SELECT` (new path) | `InterpreterSelectQueryAnalyzer` ([src/Interpreters/InterpreterSelectQueryAnalyzer.h](../src/Interpreters/InterpreterSelectQueryAnalyzer.h)) |
-| `SELECT` (legacy) | `InterpreterSelectQuery` ([src/Interpreters/InterpreterSelectQuery.h](../src/Interpreters/InterpreterSelectQuery.h)) |
+| `SELECT` (new path) | `InterpreterSelectQueryAnalyzer` ([src/Interpreters/InterpreterSelectQueryAnalyzer.h](../../src/Interpreters/InterpreterSelectQueryAnalyzer.h)) |
+| `SELECT` (legacy) | `InterpreterSelectQuery` ([src/Interpreters/InterpreterSelectQuery.h](../../src/Interpreters/InterpreterSelectQuery.h)) |
 | `INSERT` | `InterpreterInsertQuery` |
 | `CREATE TABLE/VIEW/DATABASE` | `InterpreterCreateQuery` |
 | `ALTER` | `InterpreterAlterQuery` |
@@ -100,15 +100,15 @@ The top-level dispatcher is [src/Interpreters/InterpreterFactory.h](../src/Inter
 
 Every interpreter implements `IInterpreter::execute()` returning a `BlockIO` — a small bundle holding the resulting `QueryPipeline` (in/out, depending on direction) and lifetime objects. For `SELECT`, the returned pipeline is *pulling* (the caller pulls chunks); for `INSERT ... VALUES`, it's *pushing* (the caller pushes parsed rows); for some DDLs, it's *completed* (no I/O, the executor runs it to completion internally).
 
-The entry point that ties parser, interpreter, and pipeline together is `executeQuery`/`executeQueryImpl` in [src/Interpreters/executeQuery.cpp](../src/Interpreters/executeQuery.cpp). That file is also where logging, query-log writing, exception conversion, on-error callbacks, and the various pre/post hooks live — when you debug "why did this query do X," it's usually the right first stop.
+The entry point that ties parser, interpreter, and pipeline together is `executeQuery`/`executeQueryImpl` in [src/Interpreters/executeQuery.cpp](../../src/Interpreters/executeQuery.cpp). That file is also where logging, query-log writing, exception conversion, on-error callbacks, and the various pre/post hooks live — when you debug "why did this query do X," it's usually the right first stop.
 
 ## 7. Context
 
-[src/Interpreters/Context.h](../src/Interpreters/Context.h) is the omnipresent object that ties all of the above together. There is a single `ContextSharedPart` (process-wide; databases, settings registry, function/aggregate function factories, caches, thread pools, the metric system) and an arbitrary number of `Context` instances (per-query, per-subquery, per-distributed-fragment) that share the `SharedPart` by pointer and own their own mutable per-query state.
+[src/Interpreters/Context.h](../../src/Interpreters/Context.h) is the omnipresent object that ties all of the above together. There is a single `ContextSharedPart` (process-wide; databases, settings registry, function/aggregate function factories, caches, thread pools, the metric system) and an arbitrary number of `Context` instances (per-query, per-subquery, per-distributed-fragment) that share the `SharedPart` by pointer and own their own mutable per-query state.
 
 What a `Context` carries that you care about:
 
-- **Settings.** `context->getSettingsRef()` → `Settings` ([src/Core/Settings.h](../src/Core/Settings.h)). All knobs (`max_threads`, `max_memory_usage`, `allow_experimental_analyzer`, hundreds more).
+- **Settings.** `context->getSettingsRef()` → `Settings` ([src/Core/Settings.h](../../src/Core/Settings.h)). All knobs (`max_threads`, `max_memory_usage`, `enable_analyzer`, hundreds more).
 - **Database catalog.** `context->getCurrentDatabase()`, table lookups via `DatabaseCatalog`. See [04-storages-and-mergetree.md](04-storages-and-mergetree.md).
 - **Access control.** `ContextAccess`, row policies, quotas, user role.
 - **Caches.** Mark cache, uncompressed cache, query result cache, query condition cache.

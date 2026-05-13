@@ -9,7 +9,7 @@ This file covers both, plus the Keeper service itself.
 
 ## Clusters
 
-[src/Interpreters/Cluster.h](../src/Interpreters/Cluster.h) is the in-memory representation of a `remote_servers` configuration. A `Cluster` has one or more `Shard`s; each `Shard` has one or more `Replica`s (addresses with credentials). Replicas are marked as **local** when their host matches the current server — local replicas execute in-process and skip the network entirely.
+[src/Interpreters/Cluster.h](../../src/Interpreters/Cluster.h) is the in-memory representation of a `remote_servers` configuration. A `Cluster` has one or more `Shard`s; each `Shard` has one or more `Replica`s (addresses with credentials). Replicas are marked as **local** when their host matches the current server — local replicas execute in-process and skip the network entirely.
 
 `Cluster::Address` carries everything `Connection` needs: host, port, user/password, secure flag, cluster secret (for inter-server authentication), bind host. `ClusterConnectionParameters` aggregates the same fields with their defaults.
 
@@ -17,7 +17,7 @@ A `Cluster` is shared (immutable after construction). DNS resolution, connection
 
 ## `StorageDistributed`
 
-[src/Storages/StorageDistributed.h](../src/Storages/StorageDistributed.h) is a *proxy* table engine. It points to (a) a cluster name and (b) a remote database + table name (which must exist on the shards). Locally it stores no data.
+[src/Storages/StorageDistributed.h](../../src/Storages/StorageDistributed.h) is a *proxy* table engine. It points to (a) a cluster name and (b) a remote database + table name (which must exist on the shards). Locally it stores no data.
 
 ### Reads
 
@@ -41,20 +41,20 @@ The planner is aware of distribution. For a `GROUP BY`, it splits work into two 
 - **Partial aggregation on shards.** The remote query is rewritten to include `WITH TOTALS` / `GROUP BY` and the shard returns *states*, not finalized values. The state shipping uses the same `-State`/`-Merge` machinery as `AggregatingMergeTree`.
 - **Final aggregation on initiator.** A `MergingAggregatedTransform` combines shard states.
 
-Similarly for `ORDER BY` (`partial → final` sort+merge), `DISTINCT`, `LIMIT BY`. Most of the planning logic is in [src/Storages/buildQueryTreeForShard.cpp](../src/Storages/buildQueryTreeForShard.cpp) and the per-step `ReadFromRemote` lowering.
+Similarly for `ORDER BY` (`partial → final` sort+merge), `DISTINCT`, `LIMIT BY`. Most of the planning logic is in [src/Storages/buildQueryTreeForShard.cpp](../../src/Storages/buildQueryTreeForShard.cpp) and the per-step `ReadFromRemote` lowering.
 
 ### Writes (sync and async)
 
 `INSERT INTO distributed_table` can take one of two paths:
 
-1. **Synchronous** (`insert_distributed_sync = 1`). Rows are split by sharding key on the initiator and pushed to each shard immediately over native protocol.
-2. **Async, the default.** Rows are written to per-shard subdirectories under the table's local data dir (one `.bin` file per failed-or-pending block per shard). A background `DistributedAsyncInsertDirectoryQueue` ([src/Storages/Distributed/DistributedAsyncInsertDirectoryQueue.h](../src/Storages/Distributed/DistributedAsyncInsertDirectoryQueue.h)) drains them. This buffers inserts when shards are slow or unreachable, at the cost of weaker durability (the local disk is the source of truth until drained).
+1. **Synchronous** (`distributed_foreground_insert = 1`, formerly `insert_distributed_sync`). Rows are split by sharding key on the initiator and pushed to each shard immediately over native protocol; the `INSERT` only succeeds once every shard has acknowledged.
+2. **Async, the default.** Rows are written to per-shard subdirectories under the table's local data dir (one `.bin` file per failed-or-pending block per shard). A background `DistributedAsyncInsertDirectoryQueue` ([src/Storages/Distributed/DistributedAsyncInsertDirectoryQueue.h](../../src/Storages/Distributed/DistributedAsyncInsertDirectoryQueue.h)) drains them. This buffers inserts when shards are slow or unreachable, at the cost of weaker durability (the local disk is the source of truth until drained).
 
 The **sharding key** is an arbitrary expression (typically `cityHash64(user_id)`); modulo the sum of shard weights it picks the destination shard.
 
 ### `RemoteQueryExecutor`
 
-[src/QueryPipeline/RemoteQueryExecutor.h](../src/QueryPipeline/RemoteQueryExecutor.h) is the workhorse for remote-side execution. It:
+[src/QueryPipeline/RemoteQueryExecutor.h](../../src/QueryPipeline/RemoteQueryExecutor.h) is the workhorse for remote-side execution. It:
 
 1. Opens a `Connection` (from the pool with failover).
 2. Sends `query`, current `Settings`, scalars, prepared sets, external tables, and the originator's user context.
@@ -68,31 +68,31 @@ It supports a few advanced modes:
 
 ### `Connection`
 
-[src/Client/Connection.h](../src/Client/Connection.h) is the native-protocol client. It speaks the same TCP wire format that `clickhouse-client` uses (`CompressedReadBuffer`/`CompressedWriteBuffer` over the socket; LZ4 by default; ZSTD optional). Packet types are defined in [src/Core/Protocol.h](../src/Core/Protocol.h).
+[src/Client/Connection.h](../../src/Client/Connection.h) is the native-protocol client. It speaks the same TCP wire format that `clickhouse-client` uses (`CompressedReadBuffer`/`CompressedWriteBuffer` over the socket; LZ4 by default; ZSTD optional). Packet types are defined in [src/Core/Protocol.h](../../src/Core/Protocol.h).
 
 The pool layer (`ConnectionPool`, `ConnectionPoolWithFailover`) caches connections, applies hedged requests / health-based failover, and re-uses keep-alive sockets.
 
 ## Inter-server HTTP: replication transport
 
-Replication doesn't use the native protocol — it uses HTTP between servers (often on a separate `interserver_http_port` and `interserver_http_credentials`). The dispatch lives in [src/Interpreters/InterserverIOHandler.h](../src/Interpreters/InterserverIOHandler.h): an `InterserverIOEndpoint` interface plus a registry indexed by URL path.
+Replication doesn't use the native protocol — it uses HTTP between servers (often on a separate `interserver_http_port` and `interserver_http_credentials`). The dispatch lives in [src/Interpreters/InterserverIOHandler.h](../../src/Interpreters/InterserverIOHandler.h): an `InterserverIOEndpoint` interface plus a registry indexed by URL path.
 
 The two main endpoints:
 
-- **`DataPartsExchange::Service`** ([src/Storages/MergeTree/DataPartsExchange.h](../src/Storages/MergeTree/DataPartsExchange.h)) — serves parts. When replica B needs a part replica A produced, B sends an HTTP GET with the part name; A streams the part directory contents (column `.bin`, `.mrk`, indexes, checksums) back.
+- **`DataPartsExchange::Service`** ([src/Storages/MergeTree/DataPartsExchange.h](../../src/Storages/MergeTree/DataPartsExchange.h)) — serves parts. When replica B needs a part replica A produced, B sends an HTTP GET with the part name; A streams the part directory contents (column `.bin`, `.mrk`, indexes, checksums) back.
 - **`DataPartsExchange::Fetcher`** — the client side. Downloads the part into a `tmp_<name>/` directory, verifies checksums, and renames into place.
 
 Replication is fundamentally "ship parts; replay a log of merge/mutation decisions." The log lives in Keeper, the parts ride over HTTP.
 
 ## ClickHouse Keeper
 
-ClickHouse ships a built-in coordination service compatible with the ZooKeeper wire protocol but built on Raft (NuRaft). It's in [src/Coordination/](../src/Coordination/). You can either point ClickHouse at an external ZooKeeper ensemble or run Keeper embedded in the ClickHouse binary or as a standalone `clickhouse-keeper` process.
+ClickHouse ships a built-in coordination service compatible with the ZooKeeper wire protocol but built on Raft (NuRaft). It's in [src/Coordination/](../../src/Coordination/). You can either point ClickHouse at an external ZooKeeper ensemble or run Keeper embedded in the ClickHouse binary or as a standalone `clickhouse-keeper` process.
 
 Key files:
 
-- [src/Coordination/KeeperServer.h](../src/Coordination/KeeperServer.h) — wraps NuRaft. Manages the Raft state, log, and cluster membership.
-- [src/Coordination/KeeperStateMachine.h](../src/Coordination/KeeperStateMachine.h) — implements `nuraft::state_machine`. Holds the actual key-value tree (ZooKeeper-style hierarchical znodes with watches, ephemerals, sequential creates) and applies committed Raft entries.
-- [src/Coordination/KeeperStorage.h](../src/Coordination/KeeperStorage.h) — the in-memory storage backing the state machine.
-- [src/Coordination/KeeperSnapshotManager.h](../src/Coordination/KeeperSnapshotManager.h) — periodic full snapshots so Raft logs can be truncated. Snapshots can be stored on local disk and/or S3.
+- [src/Coordination/KeeperServer.h](../../src/Coordination/KeeperServer.h) — wraps NuRaft. Manages the Raft state, log, and cluster membership.
+- [src/Coordination/KeeperStateMachine.h](../../src/Coordination/KeeperStateMachine.h) — implements `nuraft::state_machine`. Holds the actual key-value tree (ZooKeeper-style hierarchical znodes with watches, ephemerals, sequential creates) and applies committed Raft entries.
+- [src/Coordination/KeeperStorage.h](../../src/Coordination/KeeperStorage.h) — the in-memory storage backing the state machine.
+- [src/Coordination/KeeperSnapshotManager.h](../../src/Coordination/KeeperSnapshotManager.h) — periodic full snapshots so Raft logs can be truncated. Snapshots can be stored on local disk and/or S3.
 
 What ClickHouse uses Keeper for:
 

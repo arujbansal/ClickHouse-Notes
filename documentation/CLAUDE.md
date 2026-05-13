@@ -34,7 +34,7 @@ This is **not** official ClickHouse documentation. It lives under `documentation
 
 ## Writing conventions (preserve these when editing)
 
-- **Markdown link syntax for code references**, not backticks. The user uses the VSCode extension which makes these clickable: `[src/Foo/Bar.h](../src/Foo/Bar.h)` or `[src/Foo/Bar.h:42](../src/Foo/Bar.h#L42)`. Links are relative from a doc file *inside* `documentation/`, so they start with `../`. Backticks are still used for inline class/function/SQL names (e.g. `IColumn`, `MergeTree`), per the project `CLAUDE.md` rule about literal names from the SQL language / classes / functions.
+- **Markdown link syntax for code references**, not backticks. The user uses the VSCode extension which makes these clickable: `[src/Foo/Bar.h](../../src/Foo/Bar.h)` or `[src/Foo/Bar.h:42](../../src/Foo/Bar.h#L42)`. The depth is `../../` because this folder lives at `ClickHouse-Notes/documentation/` and is symlinked into the ClickHouse repo as `<repo>/ClickHouse-Notes`, so a doc at `<repo>/ClickHouse-Notes/documentation/foo.md` needs to climb two directories to reach `<repo>/src/`. Backticks are still used for inline class/function/SQL names (e.g. `IColumn`, `MergeTree`), per the project `CLAUDE.md` rule about literal names from the SQL language / classes / functions.
 - **No emojis.** None in the docs, none in `CLAUDE.md`.
 - **No "see also" or "for more info" filler.** Cross-link by name with markdown links to the relevant other doc file or section.
 - **Tables for taxonomies.** When listing engine families, processor types, combinator suffixes, etc., use a two-column markdown table. Prose for everything else.
@@ -80,7 +80,7 @@ If the user reports a stale link, just drop the line anchor — don't go on a hu
 
 ## Quick checklist before committing edits to this folder
 
-- [ ] All new code references use markdown links with `../src/...` paths.
+- [ ] All new code references use markdown links with `../../src/...` paths (the folder is consumed via a symlink at `<repo>/ClickHouse-Notes`, so two levels up reach `<repo>/src/`).
 - [ ] No emojis, no co-author trailer in the commit message, branch is not `master`.
 - [ ] Inline class/function/SQL names are in backticks; function names appear without parens.
 - [ ] If a new file was added, `00-overview.md`'s top-of-file table includes it.

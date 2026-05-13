@@ -4,9 +4,9 @@ This file covers the outer ring: how a `clickhouse-server` process starts up, ho
 
 ## Process startup
 
-The server entry point is [programs/server/Server.cpp](../programs/server/Server.cpp), which is a few thousand lines of mostly initialization. The high-level startup sequence:
+The server entry point is [programs/server/Server.cpp](../../programs/server/Server.cpp), which is a few thousand lines of mostly initialization. The high-level startup sequence:
 
-1. **Daemon bootstrap.** [src/Daemon/BaseDaemon.h](../src/Daemon/BaseDaemon.h) sets up signal handlers, the crash signal handler that writes a backtrace via libunwind, logging, and the PID file.
+1. **Daemon bootstrap.** [src/Daemon/BaseDaemon.h](../../src/Daemon/BaseDaemon.h) sets up signal handlers, the crash signal handler that writes a backtrace via libunwind, logging, and the PID file.
 2. **Logger.** Poco-based logger configured from `<logger>` section of `config.xml`.
 3. **Configuration.** Loads `config.xml` plus `config.d/*.xml`, `users.xml` plus `users.d/*.xml`, with includes and ZooKeeper-served overrides. The result is the runtime config tree consulted everywhere.
 4. **Global `Context`.** `Context::createGlobal(shared_part)` creates the process-wide `Context`. From this point on, every subsystem registers into the shared part.
@@ -25,20 +25,20 @@ Each protocol is one connection-per-thread (the threads are pooled). The handler
 
 | Handler | File | Wire format |
 | --- | --- | --- |
-| `TCPHandler` | [src/Server/TCPHandler.cpp](../src/Server/TCPHandler.cpp) | Native binary protocol. `Hello` → `Query` → multiple `Data` packets → `EndOfStream`. Used by `clickhouse-client`, drivers, and inter-server. |
-| `HTTPHandler` | [src/Server/HTTPHandler.h](../src/Server/HTTPHandler.h) | HTTP: `POST /?query=...` (body is the query or the data, depending), authentication via headers or URL params. |
-| `MySQLHandler` | [src/Server/MySQLHandler.h](../src/Server/MySQLHandler.h) | MySQL wire protocol — ClickHouse impersonates a MySQL server so BI tools / ORMs can connect. |
-| `PostgreSQLHandler` | [src/Server/PostgreSQLHandler.h](../src/Server/PostgreSQLHandler.h) | PostgreSQL wire protocol — same idea. |
-| `GRPCServer` | [src/Server/GRPCServer.h](../src/Server/GRPCServer.h) | gRPC service for languages without a native client. |
-| `KeeperTCPHandler` | [src/Server/KeeperTCPHandler.h](../src/Server/KeeperTCPHandler.h) | ZooKeeper-compatible wire protocol for the Keeper port. |
-| `InterserverIOHTTPHandler` | [src/Server/InterserverIOHTTPHandler.h](../src/Server/InterserverIOHTTPHandler.h) | HTTP server hosting the replication endpoints (see [07-distributed-and-coordination.md](07-distributed-and-coordination.md)). |
-| `PrometheusRequestHandler` | [src/Server/PrometheusRequestHandler.h](../src/Server/PrometheusRequestHandler.h) | Metrics scrape endpoint. |
+| `TCPHandler` | [src/Server/TCPHandler.cpp](../../src/Server/TCPHandler.cpp) | Native binary protocol. `Hello` → `Query` → multiple `Data` packets → `EndOfStream`. Used by `clickhouse-client`, drivers, and inter-server. |
+| `HTTPHandler` | [src/Server/HTTPHandler.h](../../src/Server/HTTPHandler.h) | HTTP: `POST /?query=...` (body is the query or the data, depending), authentication via headers or URL params. |
+| `MySQLHandler` | [src/Server/MySQLHandler.h](../../src/Server/MySQLHandler.h) | MySQL wire protocol — ClickHouse impersonates a MySQL server so BI tools / ORMs can connect. |
+| `PostgreSQLHandler` | [src/Server/PostgreSQLHandler.h](../../src/Server/PostgreSQLHandler.h) | PostgreSQL wire protocol — same idea. |
+| `GRPCServer` | [src/Server/GRPCServer.h](../../src/Server/GRPCServer.h) | gRPC service for languages without a native client. |
+| `KeeperTCPHandler` | [src/Server/KeeperTCPHandler.h](../../src/Server/KeeperTCPHandler.h) | ZooKeeper-compatible wire protocol for the Keeper port. |
+| `InterserverIOHTTPHandler` | [src/Server/InterserverIOHTTPHandler.h](../../src/Server/InterserverIOHTTPHandler.h) | HTTP server hosting the replication endpoints (see [07-distributed-and-coordination.md](07-distributed-and-coordination.md)). |
+| `PrometheusRequestHandler` | [src/Server/PrometheusRequestHandler.h](../../src/Server/PrometheusRequestHandler.h) | Metrics scrape endpoint. |
 
 ### Anatomy of `TCPHandler::run`
 
 A simplified trace of a typical `SELECT` over native TCP:
 
-1. **Handshake.** Read `Hello` packet (client name/version, default DB, user, password). Authenticate via `IAccessControl`. Establish a `Session` ([src/Interpreters/Session.h](../src/Interpreters/Session.h)) bound to this user.
+1. **Handshake.** Read `Hello` packet (client name/version, default DB, user, password). Authenticate via `IAccessControl`. Establish a `Session` ([src/Interpreters/Session.h](../../src/Interpreters/Session.h)) bound to this user.
 2. **Per-query loop.** Each iteration:
    a. Read `Query` packet (query string, `Settings` overrides, `client_info`).
    b. Create a per-query `Context` via `Context::createCopy(session_context)`. Apply settings; install `process_list_entry`; set query ID, initial user, etc.
@@ -53,7 +53,7 @@ A simplified trace of a typical `SELECT` over native TCP:
 
 ## `Context`
 
-[src/Interpreters/Context.h](../src/Interpreters/Context.h) is, in a phrase, **the dependency-injection container of ClickHouse**. Every layer accesses settings, caches, the database catalog, access control, the thread pool, and current-query state through it.
+[src/Interpreters/Context.h](../../src/Interpreters/Context.h) is, in a phrase, **the dependency-injection container of ClickHouse**. Every layer accesses settings, caches, the database catalog, access control, the thread pool, and current-query state through it.
 
 Architecturally, `Context` is split:
 
@@ -90,19 +90,19 @@ Parents are reached by `getQueryContext()`, `getSessionContext()`, `getGlobalCon
 
 ### Settings
 
-[src/Core/Settings.h](../src/Core/Settings.h) defines hundreds of knobs as a macro-expanded `Settings` struct. They're typed (`UInt64`, `Bool`, `String`, `Float`, `Milliseconds`, enums), and each carries a description and a `Tier` (`Production`, `Beta`, `Experimental`, `Obsolete`). The same machinery powers per-user defaults (in `users.xml`), per-profile defaults, per-query `SET`/`SETTINGS`, and the `system.settings` introspection table.
+[src/Core/Settings.h](../../src/Core/Settings.h) defines hundreds of knobs as a macro-expanded `Settings` struct. They're typed (`UInt64`, `Bool`, `String`, `Float`, `Milliseconds`, enums), and each carries a description and a `Tier` (`Production`, `Beta`, `Experimental`, `Obsolete`). The same machinery powers per-user defaults (in `users.xml`), per-profile defaults, per-query `SET`/`SETTINGS`, and the `system.settings` introspection table.
 
 Notable subgroups: `max_*` (limits), `enable_*` / `allow_*` (feature gates), `optimize_*` (optimizer flags), `merge_tree_*` (read tuning), `background_*` (pool sizes), `input_format_*` / `output_format_*` (format tuning).
 
 ### Access control
 
-`AccessControl` ([src/Access/AccessControl.h](../src/Access/AccessControl.h)) is the singleton that holds users, roles, row policies, quotas, and settings profiles. The current `Context`'s `ContextAccess` is the **resolved** view for the current user: the union of their roles' grants, the applicable row policies, the active quota state.
+`AccessControl` ([src/Access/AccessControl.h](../../src/Access/AccessControl.h)) is the singleton that holds users, roles, row policies, quotas, and settings profiles. The current `Context`'s `ContextAccess` is the **resolved** view for the current user: the union of their roles' grants, the applicable row policies, the active quota state.
 
 Every access check goes through `ContextAccess::checkAccess(AccessType, db, table, ...)`. Row policies are inserted as extra `WHERE` clauses by the analyzer when reading a covered table.
 
 ## Concurrency control: CPU slots
 
-Even with `max_threads = 16` per query, you don't want 100 concurrent queries × 16 threads = 1600 threads contending. The **concurrency control** layer ([src/Common/ConcurrencyControl.h](../src/Common/ConcurrencyControl.h)) implements a fair-share allocator of CPU slots. `PipelineExecutor` requests slots when spawning workers; the allocator grants slots up to the global limit and demotes long-running queries so a flood of short queries can interleave.
+Even with `max_threads = 16` per query, you don't want 100 concurrent queries × 16 threads = 1600 threads contending. The **concurrency control** layer ([src/Common/ConcurrencyControl.h](../../src/Common/ConcurrencyControl.h)) implements a fair-share allocator of CPU slots. `PipelineExecutor` requests slots when spawning workers; the allocator grants slots up to the global limit and demotes long-running queries so a flood of short queries can interleave.
 
 This is what `max_concurrent_queries`, `max_threads`, `concurrent_threads_soft_limit_num` interact with.
 
