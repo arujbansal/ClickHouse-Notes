@@ -1,6 +1,6 @@
 # ClickHouse-Notes
 
-Personal notes on the ClickHouse codebase.
+Personal notes on the [ClickHouse codebase](https://github.com/ClickHouse/ClickHouse).
 
 ## `documentation/`
 
